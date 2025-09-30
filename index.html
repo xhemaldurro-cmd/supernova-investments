@@ -24,7 +24,7 @@
             width: 100%;
             max-width: 900px;
         }
-        /* Stile per il loader */
+        /* Stile per il loader (Rimosso, ma mantenuto per chiarezza) */
         .loader {
             border-top: 4px solid #3b82f6;
             border-right: 4px solid transparent;
@@ -102,7 +102,7 @@
     <div class="card-container">
         <header class="text-center mb-8">
             <h1 class="text-4xl font-extrabold text-gray-800">SuperNova GLT Investments 🔒</h1>
-            <p id="user-info" class="text-sm text-blue-600 mt-2 font-medium"></p>
+            <p id="user-info" class="text-sm text-blue-600 mt-2 font-medium">Dati salvati in locale nel tuo browser. Non saranno accessibili su altri dispositivi.</p>
         </header>
         
         <!-- Riepilogo Totale (Verrà aggiornato da JS) -->
@@ -133,8 +133,7 @@
                 <button
                     type="submit"
                     id="add-invest-btn"
-                    class="bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-150 ease-in-out shadow-md disabled:bg-gray-400 col-span-1 md:col-span-5"
-                    disabled
+                    class="bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-150 ease-in-out shadow-md col-span-1 md:col-span-5"
                 >
                     Aggiungi Nuovo Investimento
                 </button>
@@ -153,10 +152,8 @@
         <div class="bg-white p-6 rounded-xl shadow-lg overflow-x-auto">
             <h2 class="text-2xl font-semibold text-gray-700 mb-4">Dettagli del Portafoglio</h2>
             
-            <!-- Indicatore di Caricamento -->
-            <p id="loading-indicator" class="text-center text-gray-500 flex items-center justify-center gap-2">
-                <span class="loader"></span> Caricamento dati e autenticazione...
-            </p>
+            <!-- Indicatore di Caricamento - Rimosso -->
+            <p id="loading-indicator" class="text-center text-gray-500 hidden"></p>
             <p id="empty-state" class="text-center text-gray-500 hidden">Nessun investimento. Aggiungine uno sopra!</p>
             
             <table class="min-w-full divide-y divide-gray-200 hidden" id="investment-table">
@@ -203,30 +200,15 @@
     <!-- Fine Modale -->
 
 
-    <!-- Importazioni Firebase e Logica JS -->
+    <!-- Logica JS con LocalStorage -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, addDoc, updateDoc, deleteDoc, onSnapshot, collection, query, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // Le importazioni di Firebase sono state rimosse per evitare blocchi.
+        
+        const LOCAL_STORAGE_KEY = 'supernovaInvestments';
+        let investments = [];
 
-        // Variabili globali fornite dall'ambiente (MANDATORIE)
-        // Usiamo valori di fallback sicuri per garantire l'avvio su hosting esterni
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        // Configurazione di Firebase vuota per evitare errori se non è definita nell'ambiente esterno
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        let app;
-        let db;
-        let auth;
-        let userId = null;
-        let isAuthReady = false;
-
-        // Variabile per tenere traccia del campo attualmente in modalità di modifica (blocco)
-        let currentlyEditingId = null; 
-
-        // Riferimento all'ID dell'asset da eliminare (per la modale)
-        let assetToDeleteId = null;
+        // Variabile fittizia per garantire l'avvio immediato
+        let isAuthReady = true; 
 
         // Riferimenti agli elementi DOM
         const investmentForm = document.getElementById('investment-form');
@@ -253,12 +235,15 @@
         const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
         const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
         const assetToDeleteNameEl = document.getElementById('asset-to-delete-name');
+        
+        // Variabile per tenere traccia del campo attualmente in modalità di modifica (blocco)
+        let currentlyEditingId = null; 
+        let assetToDeleteId = null;
 
 
         // --- Utilità ---
 
         function formatCurrency(amount) {
-            // Assicuriamo 2 decimali per la valuta
             return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
         }
 
@@ -275,107 +260,45 @@
             }, 3000);
         }
 
-        // --- Inizializzazione Firebase ---
+        // --- Gestione Dati (LocalStorage) ---
 
-        async function initFirebaseAndAuth() {
+        function saveInvestmentsToLocalStorage() {
             try {
-                // setLogLevel('debug');
-                
-                // NEW: Tentativo di inizializzazione con fallback a config vuota
-                if (Object.keys(firebaseConfig).length === 0) {
-                     console.warn("ATTENZIONE: Nessuna configurazione Firebase trovata. Utilizzo configurazione vuota, potrebbe funzionare solo per la struttura del percorso.");
-                }
-
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    // Autenticazione anonima come fallback per la persistenza privata
-                    await signInAnonymously(auth);
-                }
-
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        isAuthReady = true;
-                        
-                        // Aggiorna le informazioni UI
-                        userInfo.textContent = `Utente ID: ${userId} | I tuoi dati sono privati e non condivisi.`;
-                        addInvestBtn.disabled = false; 
-                        
-                        console.log("Autenticazione riuscita. userId:", userId);
-                        
-                        setupInvestmentsListener(); // Carica il portafoglio
-                        
-                    } else {
-                        showMessage("Autenticazione fallita. Ricarica la pagina.", true);
-                        addInvestBtn.disabled = true; 
-                    }
-                    loadingIndicator.classList.add('hidden');
-                });
-
-            } catch (error) {
-                console.error("Errore nell'inizializzazione o nell'autenticazione:", error);
-                loadingIndicator.classList.add('hidden');
-                showMessage(`Errore critico: Impossibile avviare il servizio dati. ${error.message}`, true);
-                addInvestBtn.disabled = true; 
+                // Rimuove la dipendenza da serverTimestamp e crea un array pulito per il salvataggio
+                const dataToSave = investments.map(inv => ({
+                    id: inv.id,
+                    name: inv.name,
+                    ticker: inv.ticker,
+                    quantity: inv.quantity,
+                    avgCost: inv.avgCost,
+                    currentPrice: inv.currentPrice
+                }));
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(dataToSave));
+                return true;
+            } catch (e) {
+                console.error("Errore nel salvataggio su LocalStorage:", e);
+                showMessage("Errore nel salvataggio dei dati nel browser.", true);
+                return false;
             }
         }
-        
-        // --- Funzioni di Controllo Accesso e Listener (Accesso Privato) ---
-        
-        // Funzione chiave: definisce il percorso della collezione privata
-        function getInvestmentCollectionRef() {
-            // Path PRIVATO CORRETTO (5 segmenti, finisce con una COLLEZIONE): 
-            // /artifacts/{appId}/users/{userId}/investments
-            if (!db || !userId) {
-                console.error("DB o userId non pronto per l'accesso privato.");
-                return null;
-            }
-            return collection(db, 'artifacts', appId, 'users', userId, 'investments');
-        }
-        
-        let unsubscribeListener = () => {}; // Inizializza la funzione per disconnettere il listener
 
-        // Avvia il listener Firestore per l'ID target
-        function setupInvestmentsListener() {
-            if (!isAuthReady || !db || !userId) return;
-            
-            // Disconnette il listener precedente 
-            unsubscribeListener(); 
-
-            const portfolioRef = getInvestmentCollectionRef();
-            if (!portfolioRef) return; 
-
-            const q = query(portfolioRef); 
-
-            // onSnapshot è il nuovo listener
-            unsubscribeListener = onSnapshot(q, (snapshot) => {
-                const investments = [];
-                snapshot.forEach((doc) => {
-                    investments.push({ id: doc.id, ...doc.data() });
-                });
-
+        function loadInvestmentsFromLocalStorage() {
+            try {
+                const data = localStorage.getItem(LOCAL_STORAGE_KEY);
+                investments = data ? JSON.parse(data) : [];
                 // Ordina per nome per consistenza
                 investments.sort((a, b) => a.name.localeCompare(b.name));
-
-                // Resetta lo stato di modifica
-                if (currentlyEditingId) {
-                    currentlyEditingId = null;
-                }
-                
                 renderInvestments(investments);
-            }, (error) => {
-                console.error("Errore nell'ascolto di Firestore:", error);
-                showMessage("Errore nel recupero degli investimenti.", true);
-                renderInvestments([]); // Pulisce la tabella
-            });
+                // Non abbiamo bisogno di setupInvestmentsListener()
+            } catch (e) {
+                console.error("Errore nel caricamento da LocalStorage:", e);
+                showMessage("Errore nel caricamento dei dati salvati.", true);
+                investments = [];
+                renderInvestments(investments);
+            }
         }
-        
-        
+
+
         // --- Logica Modifica UI e Salva ---
 
         // Funzione per l'icona Matita SVG
@@ -439,18 +362,13 @@
             document.getElementById(`edit-input-${id}-${field}`).focus();
         };
         
-        // Funzione per salvare la modifica
-        async function saveEdit(id, field, fieldName) {
-            if (!userId) return showMessage("Accesso negato. Utente non autenticato.", true);
-
+        // Funzione per salvare la modifica (su LocalStorage)
+        function saveEdit(id, field, fieldName) {
             const inputElement = document.getElementById(`edit-input-${id}-${field}`);
             if (!inputElement) return;
             
             const newValueString = inputElement.value;
             const value = parseFloat(newValueString);
-
-            // Per Quantità e Costo Medio, il valore deve essere >= 0. 
-            // Per Prezzo Attuale, il prezzo può essere 0 ma non negativo (sebbene raro nel trading).
             const isPriceField = field === 'currentPrice';
             
             if (isNaN(value) || value < 0 || (!isPriceField && value <= 0)) {
@@ -459,32 +377,24 @@
                  return showMessage(errorMessage, true);
             }
             
-            currentlyEditingId = null; // Rilascia il blocco di modifica
-
-            try {
-                const portfolioRef = getInvestmentCollectionRef();
-                if (!portfolioRef) return; 
-
-                const investDocRef = doc(portfolioRef, id);
-                const updatePayload = {};
-                updatePayload[field] = value; 
-
-                // Aggiorna Firestore
-                await updateDoc(investDocRef, updatePayload);
-                showMessage(`${fieldName} aggiornato con successo!`);
-            } catch (e) {
-                console.error(`Errore nell'aggiornamento del campo ${field}:`, e);
-                showMessage(`Impossibile aggiornare ${fieldName}.`, true);
-                // In caso di errore, forziamo il re-render per uscire dalla modalità modifica
-                setupInvestmentsListener(); 
+            // Trova l'investimento e aggiorna il valore
+            const index = investments.findIndex(inv => inv.id === id);
+            if (index !== -1) {
+                investments[index][field] = value;
+                
+                if (saveInvestmentsToLocalStorage()) {
+                    showMessage(`${fieldName} aggiornato con successo!`);
+                }
             }
+            
+            currentlyEditingId = null; 
+            renderInvestments(investments); // Ricalcola e ri-renderizza
         };
 
         // Funzione per annullare la modifica
         function cancelEdit() {
-            currentlyEditingId = null; // Rilascia il blocco di modifica
-            // Semplicemente forziamo un re-render (che ripristinerà il contenuto da Firestore)
-            setupInvestmentsListener(); 
+            currentlyEditingId = null;
+            renderInvestments(investments); // Ri-renderizza per tornare allo stato precedente
             showMessage("Modifica annullata.", false);
         };
 
@@ -699,20 +609,18 @@
             renderChart(chartData, totalPortfolioValue);
         }
 
-        // Funzione per eliminare un investimento
-        async function deleteInvestment(id) {
-            if (!userId) return showMessage("Accesso negato. Utente non autenticato.", true);
-            try {
-                const portfolioRef = getInvestmentCollectionRef();
-                if (!portfolioRef) return; 
-
-                const investDocRef = doc(portfolioRef, id);
-                await deleteDoc(investDocRef);
-                showMessage("Investimento eliminato!");
-            } catch (e) {
-                console.error("Errore nell'eliminazione dell'investimento:", e);
-                showMessage("Impossibile eliminare l'investimento.", true);
+        // Funzione per eliminare un investimento (su LocalStorage)
+        function deleteInvestment(id) {
+            // Filtra l'array, mantenendo solo gli elementi con ID diverso
+            const initialLength = investments.length;
+            investments = investments.filter(inv => inv.id !== id);
+            
+            if (investments.length < initialLength) {
+                if (saveInvestmentsToLocalStorage()) {
+                    showMessage("Investimento eliminato!");
+                }
             }
+            renderInvestments(investments);
         };
 
         // --- Gestione Eventi (Delegazione) ---
@@ -748,8 +656,6 @@
             }
         });
         
-        // Listener per la modifica diretta del Prezzo Attuale (rimosso)
-        
         // Listener Modale Conferma
         confirmDeleteBtn.addEventListener('click', () => {
             confirmModal.style.display = 'none';
@@ -765,65 +671,61 @@
         });
 
 
-        // Gestione dell'invio del form per Aggiungere un Nuovo Investimento
-        investmentForm.addEventListener('submit', async (e) => {
+        // Gestione dell'invio del form per Aggiungere un Nuovo Investimento (su LocalStorage)
+        investmentForm.addEventListener('submit', (e) => {
             e.preventDefault();
             
-            // 1. Validazione di base e stato pronto
             if (!isAuthReady) {
-                 // Mostra un errore se l'autenticazione non è pronta
-                 return showMessage("L'autenticazione non è pronta. Attendi il caricamento e riprova.", true);
+                 return showMessage("L'applicazione è ancora in fase di caricamento.", true);
             }
-            if (!userId) {
-                // Questo non dovrebbe accadere se isAuthReady è true, ma è un controllo di sicurezza
-                return showMessage("ID Utente non definito. Ricarica la pagina per autenticarti.", true);
-            }
-
 
             const name = assetNameInput.value.trim();
             const ticker = assetTickerInput.value.trim().toUpperCase();
             
-            // Recupero valori numerici
             const quantityValue = quantityInput.value.trim();
             const avgCostValue = avgCostInput.value.trim();
 
             const quantity = parseFloat(quantityValue);
             const avgCost = parseFloat(avgCostValue);
+            const currentPrice = avgCost;
 
             // Validazione rigorosa dei dati
             if (name === "" || ticker === "" || isNaN(quantity) || quantity <= 0 || isNaN(avgCost) || avgCost <= 0) {
                 return showMessage("Per favore, inserisci dati validi (Nome, Ticker, Quantità > 0, Costo Medio > 0).", true);
             }
 
-            // Disabilita il pulsante durante l'operazione di salvataggio
             addInvestBtn.disabled = true;
 
             try {
-                // 2. Ottenere il riferimento al portafoglio privato
-                const portfolioRef = getInvestmentCollectionRef();
-                if (!portfolioRef) {
-                    throw new Error("Riferimento alla collezione Firestore non valido.");
-                }
-                
-                // 3. Aggiunta a Firestore (Collection Privata)
-                await addDoc(portfolioRef, {
+                // Genera un ID locale unico (UUID v4)
+                const newId = crypto.randomUUID();
+
+                const newInvestment = {
+                    id: newId,
                     name: name,
                     ticker: ticker, 
                     quantity: quantity,
                     avgCost: avgCost,
-                    currentPrice: avgCost, 
-                    createdAt: serverTimestamp(),
-                    createdBy: userId
-                });
-                showMessage(`Investimento in ${name} (${ticker}) aggiunto con successo!`);
-                investmentForm.reset();
+                    currentPrice: currentPrice, 
+                };
+                
+                // Aggiunta a LocalStorage
+                investments.push(newInvestment);
+                
+                if (saveInvestmentsToLocalStorage()) {
+                    showMessage(`Investimento in ${name} (${ticker}) aggiunto con successo!`);
+                    investmentForm.reset();
+                } else {
+                    // Rimuovi se il salvataggio fallisce
+                    investments.pop();
+                }
+                
             } catch (e) {
-                // Se c'è un errore di Firestore 
                 console.error("Errore Dettagliato nell'aggiunta dell'investimento:", e);
-                showMessage(`Impossibile aggiungere l'investimento. Potrebbe essere un problema di connessione. Controlla la console per i dettagli.`, true);
+                showMessage(`Impossibile aggiungere l'investimento. Controlla la console per i dettagli.`, true);
             } finally {
-                // Riabilita il pulsante dopo il tentativo (successo o fallimento)
                 addInvestBtn.disabled = false;
+                renderInvestments(investments);
             }
         });
 
@@ -905,7 +807,7 @@
         }
 
         // Avvia l'app
-        initFirebaseAndAuth();
+        document.addEventListener('DOMContentLoaded', loadInvestmentsFromLocalStorage);
 
     </script>
 </body>
