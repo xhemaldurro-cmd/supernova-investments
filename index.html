@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SuperNova GLT Investments</title>
+    <!-- Caricamento di Tailwind CSS per uno stile moderno e responsivo -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load D3.js for chart visualization -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* Stile di base per il corpo dell'app */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        /* Stile per la card principale e layout responsive */
+        .card-container {
+            width: 100%;
+            max-width: 900px;
+        }
+        /* Stile per il loader */
+        .loader {
+            border-top: 4px solid #3b82f6;
+            border-right: 4px solid transparent;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Stili per le performance */
+        .positive { color: #10b981; } /* emerald-500 */
+        .negative { color: #ef4444; } /* red-500 */
+
+        /* Stili per il tooltip del grafico D3 */
+        #chart-tooltip {
+            position: absolute;
+            visibility: hidden;
+            background-color: rgba(0,0,0,0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            font-size: 14px;
+            z-index: 100;
+        }
+
+        /* Classe per l'input di costo medio/quantità (modalità display e edit) */
+        .avg-cost-container {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end; 
+            gap: 4px;
+        }
+        .edit-icon-btn {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+            color: #4b5563; /* gray-600 */
+        }
+        .edit-icon-btn:hover {
+            color: #2563eb; /* blue-600 */
+        }
+
+        /* Stile per la modale di conferma */
+        #confirm-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card-container">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-gray-800">SuperNova GLT Investments 🔒</h1>
+            <p id="user-info" class="text-sm text-blue-600 mt-2 font-medium"></p>
+        </header>
+        
+        <!-- Riepilogo Totale (Verrà aggiornato da JS) -->
+        <div id="portfolio-summary" class="bg-blue-600 text-white p-6 rounded-xl shadow-lg mb-8 text-center">
+            <h2 class="text-xl font-semibold mb-2">Valore Totale del Portafoglio:</h2>
+            <p class="text-5xl font-extrabold" id="total-value">€ 0.00</p>
+            <p class="text-lg mt-2" id="total-gain"></p>
+        </div>
+
+        <!-- Area di Input Nuovo Investimento -->
+        <div id="add-investment-section" class="bg-white p-6 rounded-xl shadow-lg mb-8">
+            <h2 class="text-2xl font-semibold text-gray-700 mb-4">Aggiungi Nuovo Investimento</h2>
+            <form id="investment-form" class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                
+                <!-- Colonna 1 & 2: Nome Asset -->
+                <input type="text" id="asset-name" placeholder="Nome Asset (es. Apple)" required class="col-span-1 md:col-span-2 p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                
+                <!-- Colonna 3: Ticker -->
+                <input type="text" id="asset-ticker" placeholder="Ticker (es. AAPL)" required class="p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"> 
+
+                <!-- Colonna 4: Quantità -->
+                <input type="number" step="0.01" id="quantity" placeholder="Quantità" required class="p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                
+                <!-- Colonna 5: Costo Medio -->
+                <input type="number" step="0.01" id="avg-cost" placeholder="Costo Medio (€)" required class="p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                
+                <!-- Bottone Aggiungi/Salva -->
+                <button
+                    type="submit"
+                    id="add-invest-btn"
+                    class="bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-150 ease-in-out shadow-md disabled:bg-gray-400 col-span-1 md:col-span-5"
+                    disabled
+                >
+                    Aggiungi Nuovo Investimento
+                </button>
+            </form>
+        </div>
+        
+        <!-- Sezione Grafico Distribuzione -->
+        <div class="bg-white p-6 rounded-xl shadow-lg mb-8">
+            <h2 class="text-2xl font-semibold text-gray-700 mb-4">Distribuzione del Portafoglio per Valore</h2>
+            <div id="chart-container" class="w-full flex justify-center items-center h-64">
+                <!-- Il grafico a torta D3.js verrà renderizzato qui -->
+            </div>
+        </div>
+
+        <!-- Tabella degli Investimenti -->
+        <div class="bg-white p-6 rounded-xl shadow-lg overflow-x-auto">
+            <h2 class="text-2xl font-semibold text-gray-700 mb-4">Dettagli del Portafoglio</h2>
+            
+            <!-- Indicatore di Caricamento -->
+            <p id="loading-indicator" class="text-center text-gray-500 flex items-center justify-center gap-2">
+                <span class="loader"></span> Caricamento dati e autenticazione...
+            </p>
+            <p id="empty-state" class="text-center text-gray-500 hidden">Nessun investimento. Aggiungine uno sopra!</p>
+            
+            <table class="min-w-full divide-y divide-gray-200 hidden" id="investment-table">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Asset (Ticker)</th>
+                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Quantità</th>
+                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Costo Medio</th>
+                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Prezzo Attuale</th>
+                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Valore Totale</th>
+                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Guadagno/Perdita</th>
+                        <th id="actions-header" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Azioni</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200" id="investments-body">
+                    <!-- I dati degli investimenti verranno inseriti qui -->
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Contenitore per i messaggi di stato (es. errori) -->
+        <div id="message-box" class="mt-4 p-4 rounded-lg hidden" role="alert"></div>
+
+    </div>
+    
+    <!-- Tooltip per il grafico (necessario per D3.js) -->
+    <div id="chart-tooltip"></div>
+
+    <!-- Modale di Conferma Eliminazione -->
+    <div id="confirm-modal">
+        <div class="modal-content">
+            <h3 class="text-xl font-bold mb-4 text-gray-800">Conferma Eliminazione</h3>
+            <p class="text-gray-600 mb-6">Sei sicuro di voler eliminare l'investimento <span id="asset-to-delete-name" class="font-semibold"></span>?</p>
+            <div class="flex justify-center gap-4">
+                <button id="confirm-delete-btn" class="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition">
+                    Sì, Elimina
+                </button>
+                <button id="cancel-delete-btn" class="bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+            </div>
+        </div>
+    </div>
+    <!-- Fine Modale -->
+
+
+    <!-- Importazioni Firebase e Logica JS -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, updateDoc, deleteDoc, onSnapshot, collection, query, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Variabili globali fornite dall'ambiente (MANDATORIE)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app;
+        let db;
+        let auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        // Variabile per tenere traccia del campo attualmente in modalità di modifica (blocco)
+        let currentlyEditingId = null; 
+
+        // Riferimento all'ID dell'asset da eliminare (per la modale)
+        let assetToDeleteId = null;
+
+        // Riferimenti agli elementi DOM
+        const investmentForm = document.getElementById('investment-form');
+        const assetNameInput = document.getElementById('asset-name');
+        const assetTickerInput = document.getElementById('asset-ticker'); 
+        const addInvestBtn = document.getElementById('add-invest-btn');
+        const investmentsBody = document.getElementById('investments-body');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const emptyState = document.getElementById('empty-state');
+        const userInfo = document.getElementById('user-info');
+        const messageBox = document.getElementById('message-box');
+        const investmentTable = document.getElementById('investment-table');
+        const totalValueEl = document.getElementById('total-value');
+        const totalGainEl = document.getElementById('total-gain');
+        const chartTooltip = document.getElementById('chart-tooltip');
+        const actionsHeader = document.getElementById('actions-header');
+        
+        // Riferimenti diretti agli input Quantità e Costo Medio del form di aggiunta
+        const quantityInput = document.getElementById('quantity');
+        const avgCostInput = document.getElementById('avg-cost');
+
+        // Riferimenti Modale
+        const confirmModal = document.getElementById('confirm-modal');
+        const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+        const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
+        const assetToDeleteNameEl = document.getElementById('asset-to-delete-name');
+
+
+        // --- Utilità ---
+
+        function formatCurrency(amount) {
+            // Assicuriamo 2 decimali per la valuta
+            return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+        }
+
+        function formatPercentage(value) {
+            return new Intl.NumberFormat('it-IT', { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+        }
+
+        function showMessage(text, isError = false) {
+            messageBox.textContent = text;
+            messageBox.className = `mt-4 p-4 rounded-lg text-white font-semibold ${isError ? 'bg-red-500' : 'bg-green-500'}`;
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, 3000);
+        }
+
+        // --- Inizializzazione Firebase ---
+
+        async function initFirebaseAndAuth() {
+            try {
+                // setLogLevel('debug');
+                
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        
+                        // Aggiorna le informazioni UI
+                        userInfo.textContent = `Utente ID: ${userId} | I tuoi dati sono privati e non condivisi.`;
+                        // QUI: Abilita il pulsante solo dopo che l'autenticazione è completa
+                        addInvestBtn.disabled = false; 
+                        
+                        console.log("Autenticazione riuscita. userId:", userId);
+                        
+                        setupInvestmentsListener(); // Carica il portafoglio
+                        
+                    } else {
+                        showMessage("Autenticazione fallita. Ricarica la pagina.", true);
+                        // QUI: Assicura che il pulsante sia disabilitato in caso di fallimento
+                        addInvestBtn.disabled = true; 
+                    }
+                    loadingIndicator.classList.add('hidden');
+                });
+
+            } catch (error) {
+                console.error("Errore nell'inizializzazione o nell'autenticazione:", error);
+                loadingIndicator.classList.add('hidden');
+                showMessage(`Errore critico: ${error.message}`, true);
+            }
+        }
+        
+        // --- Funzioni di Controllo Accesso e Listener (Accesso Privato) ---
+        
+        // Funzione chiave: definisce il percorso della collezione privata
+        function getInvestmentCollectionRef() {
+            // Path PRIVATO CORRETTO (5 segmenti, finisce con una COLLEZIONE): 
+            // /artifacts/{appId}/users/{userId}/investments
+            if (!db || !userId) {
+                console.error("DB o userId non pronto per l'accesso privato.");
+                return null;
+            }
+            return collection(db, 'artifacts', appId, 'users', userId, 'investments');
+        }
+        
+        let unsubscribeListener = () => {}; // Inizializza la funzione per disconnettere il listener
+
+        // Avvia il listener Firestore per l'ID target
+        function setupInvestmentsListener() {
+            if (!isAuthReady || !db || !userId) return;
+            
+            // Disconnette il listener precedente 
+            unsubscribeListener(); 
+
+            const portfolioRef = getInvestmentCollectionRef();
+            if (!portfolioRef) return; 
+
+            const q = query(portfolioRef); 
+
+            // onSnapshot è il nuovo listener
+            unsubscribeListener = onSnapshot(q, (snapshot) => {
+                const investments = [];
+                snapshot.forEach((doc) => {
+                    investments.push({ id: doc.id, ...doc.data() });
+                });
+
+                // Ordina per nome per consistenza
+                investments.sort((a, b) => a.name.localeCompare(b.name));
+
+                // Resetta lo stato di modifica
+                if (currentlyEditingId) {
+                    currentlyEditingId = null;
+                }
+                
+                renderInvestments(investments);
+            }, (error) => {
+                console.error("Errore nell'ascolto di Firestore:", error);
+                showMessage("Errore nel recupero degli investimenti.", true);
+                renderInvestments([]); // Pulisce la tabella
+            });
+        }
+        
+        
+        // --- Logica Modifica UI e Salva ---
+
+        // Funzione per l'icona Matita SVG
+        function getEditIconSvg() {
+            return `<svg class="edit-icon-btn" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 3a2.85 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+            </svg>`;
+        }
+
+
+        // Funzione per passare da modalità di visualizzazione a modalità di modifica
+        function toggleEdit(id, field, currentValue, fieldName) {
+            const containerId = `edit-container-${id}-${field}`;
+            const container = document.getElementById(containerId);
+            
+            if (!container) return;
+
+            // Se stiamo già modificando un altro campo, ignoriamo
+            if (currentlyEditingId && currentlyEditingId !== containerId) {
+                showMessage("Salva o annulla la modifica in corso prima di finirla.", true);
+                return;
+            }
+
+            // Entra in modalità modifica
+            currentlyEditingId = containerId;
+            
+            // Crea l'HTML per la modalità di modifica
+            container.innerHTML = `
+                <input 
+                    type="number" 
+                    step="0.01" 
+                    id="edit-input-${id}-${field}"
+                    value="${currentValue}" 
+                    data-id="${id}"
+                    data-field="${field}"
+                    data-fieldname="${fieldName}"
+                    class="w-24 p-1 border text-right rounded-md focus:ring-blue-500 focus:border-blue-500 text-gray-800"
+                >
+                <div class="flex flex-col gap-1 ml-2">
+                    <button 
+                        data-action="save"
+                        data-id="${id}"
+                        data-field="${field}"
+                        data-fieldname="${fieldName}"
+                        class="text-xs bg-green-500 text-white rounded px-1 py-0.5 hover:bg-green-600 transition save-edit-btn"
+                        title="Salva Modifica"
+                    >
+                        Salva
+                    </button>
+                    <button 
+                        data-action="cancel"
+                        class="text-xs bg-red-500 text-white rounded px-1 py-0.5 hover:bg-red-600 transition cancel-edit-btn"
+                        title="Annulla Modifica"
+                    >
+                        Annulla
+                    </button>
+                </div>
+            `;
+
+            // Mette il focus sull'input appena creato
+            document.getElementById(`edit-input-${id}-${field}`).focus();
+        };
+        
+        // Funzione per salvare la modifica
+        async function saveEdit(id, field, fieldName) {
+            if (!userId) return showMessage("Accesso negato. Utente non autenticato.", true);
+
+            const inputElement = document.getElementById(`edit-input-${id}-${field}`);
+            if (!inputElement) return;
+            
+            const newValueString = inputElement.value;
+            const value = parseFloat(newValueString);
+
+            // Per Quantità e Costo Medio, il valore deve essere >= 0. 
+            // Per Prezzo Attuale, il prezzo può essere 0 ma non negativo (sebbene raro nel trading).
+            const isPriceField = field === 'currentPrice';
+            
+            if (isNaN(value) || value < 0 || (!isPriceField && value <= 0)) {
+                 let errorMessage = `Valore non valido per ${fieldName}.`;
+                 if (!isPriceField) errorMessage += ' Deve essere un numero positivo.';
+                 return showMessage(errorMessage, true);
+            }
+            
+            currentlyEditingId = null; // Rilascia il blocco di modifica
+
+            try {
+                const portfolioRef = getInvestmentCollectionRef();
+                if (!portfolioRef) return; 
+
+                const investDocRef = doc(portfolioRef, id);
+                const updatePayload = {};
+                updatePayload[field] = value; 
+
+                // Aggiorna Firestore
+                await updateDoc(investDocRef, updatePayload);
+                showMessage(`${fieldName} aggiornato con successo!`);
+            } catch (e) {
+                console.error(`Errore nell'aggiornamento del campo ${field}:`, e);
+                showMessage(`Impossibile aggiornare ${fieldName}.`, true);
+                // In caso di errore, forziamo il re-render per uscire dalla modalità modifica
+                setupInvestmentsListener(); 
+            }
+        };
+
+        // Funzione per annullare la modifica
+        function cancelEdit() {
+            currentlyEditingId = null; // Rilascia il blocco di modifica
+            // Semplicemente forziamo un re-render (che ripristinerà il contenuto da Firestore)
+            setupInvestmentsListener(); 
+            showMessage("Modifica annullata.", false);
+        };
+
+
+        // Rendering degli Investimenti e Calcoli Totali
+        function renderInvestments(investments) {
+            investmentsBody.innerHTML = '';
+            let totalPortfolioValue = 0;
+            let totalInvestedCapital = 0;
+            const chartData = [];
+            
+            document.getElementById('actions-header').style.display = 'table-cell'; 
+
+
+            if (investments.length === 0) {
+                emptyState.classList.remove('hidden');
+                investmentTable.classList.add('hidden');
+            } else {
+                emptyState.classList.add('hidden');
+                investmentTable.classList.remove('hidden');
+
+                investments.forEach(asset => {
+                    // Calcoli di performance
+                    const investedCapital = asset.quantity * asset.avgCost;
+                    const currentValue = asset.quantity * asset.currentPrice;
+                    const gainLoss = currentValue - investedCapital;
+                    const percentChange = investedCapital > 0 ? (gainLoss / investedCapital) : 0;
+
+                    // Aggiornamento totali
+                    totalPortfolioValue += currentValue;
+                    totalInvestedCapital += investedCapital;
+                    
+                    // Dati per il grafico
+                    chartData.push({
+                        name: asset.name,
+                        value: currentValue,
+                    });
+
+                    // Formattazione per la UI
+                    const gainLossClass = gainLoss >= 0 ? 'positive' : 'negative';
+                    const gainLossText = formatCurrency(gainLoss) + ` (${formatPercentage(percentChange)})`;
+
+                    const row = investmentsBody.insertRow();
+                    row.className = 'hover:bg-gray-50 transition duration-100';
+                    row.dataset.id = asset.id; // Imposta l'ID per la delega eventi
+
+                    // Colonna 1: Nome Asset (Ticker)
+                    row.insertCell().innerHTML = `
+                        <span class="font-semibold text-gray-800">${asset.name}</span>
+                        <span class="text-xs text-gray-500 block">(${asset.ticker || 'N/A'})</span>
+                    `;
+                    
+                    // --- Colonna 2: Quantità (Modificabile) ---
+                    const containerIdQty = `edit-container-${asset.id}-quantity`;
+                    const qtyCell = row.insertCell();
+                    qtyCell.className = 'px-3 py-4 whitespace-nowrap text-sm text-right';
+                    
+                    let contentHTML_Qty = '';
+                    if (currentlyEditingId === containerIdQty) {
+                        // Modalità modifica (Salva/Annulla)
+                        contentHTML_Qty = `
+                            <input 
+                                type="number" 
+                                step="0.01" 
+                                id="edit-input-${asset.id}-quantity"
+                                value="${asset.quantity}" 
+                                data-id="${asset.id}"
+                                data-field="quantity"
+                                data-fieldname="Quantità"
+                                class="w-24 p-1 border text-right rounded-md focus:ring-blue-500 focus:border-blue-500 text-gray-800"
+                            >
+                            <div class="flex flex-col gap-1 ml-2">
+                                <button data-action="save" data-id="${asset.id}" data-field="quantity" data-fieldname="Quantità" class="text-xs bg-green-500 text-white rounded px-1 py-0.5 hover:bg-green-600 transition save-edit-btn" title="Salva Modifica">Salva</button>
+                                <button data-action="cancel" class="text-xs bg-red-500 text-white rounded px-1 py-0.5 hover:bg-red-600 transition cancel-edit-btn" title="Annulla Modifica">Annulla</button>
+                            </div>
+                        `;
+                    } else {
+                        // Modalità visualizzazione standard (Mostra matita)
+                        contentHTML_Qty = `
+                            <span class="font-medium">${asset.quantity}</span>
+                            <button 
+                                class="edit-icon-btn p-1 rounded hover:bg-gray-100" 
+                                data-action="edit" 
+                                data-id="${asset.id}" 
+                                data-field="quantity" 
+                                data-value="${asset.quantity}" 
+                                data-fieldname="Quantità"
+                                title="Modifica Quantità"
+                            >
+                                ${getEditIconSvg()}
+                            </button>
+                        `;
+                    }
+                    qtyCell.innerHTML = `<div id="${containerIdQty}" class="avg-cost-container justify-end">${contentHTML_Qty}</div>`;
+
+
+                    // --- Colonna 3: Costo Medio (Modificabile) ---
+                    const containerIdCost = `edit-container-${asset.id}-avgCost`;
+                    const avgCostCell = row.insertCell();
+                    avgCostCell.className = 'px-3 py-4 whitespace-nowrap text-sm text-right';
+
+                    let contentHTML_Cost = '';
+                    if (currentlyEditingId === containerIdCost) {
+                        // Modalità modifica (Salva/Annulla)
+                         contentHTML_Cost = `
+                            <input 
+                                type="number" 
+                                step="0.01" 
+                                id="edit-input-${asset.id}-avgCost"
+                                value="${asset.avgCost}" 
+                                data-id="${asset.id}"
+                                data-field="avgCost"
+                                data-fieldname="Costo Medio"
+                                class="w-24 p-1 border text-right rounded-md focus:ring-blue-500 focus:border-blue-500 text-gray-800"
+                            >
+                            <div class="flex flex-col gap-1 ml-2">
+                                <button data-action="save" data-id="${asset.id}" data-field="avgCost" data-fieldname="Costo Medio" class="text-xs bg-green-500 text-white rounded px-1 py-0.5 hover:bg-green-600 transition save-edit-btn" title="Salva Modifica">Salva</button>
+                                <button data-action="cancel" class="text-xs bg-red-500 text-white rounded px-1 py-0.5 hover:bg-red-600 transition cancel-edit-btn" title="Annulla Modifica">Annulla</button>
+                            </div>
+                        `;
+                    } else {
+                        // Modalità visualizzazione standard (Mostra matita)
+                        contentHTML_Cost = `
+                            <span class="font-medium">${formatCurrency(asset.avgCost)}</span>
+                            <button 
+                                class="edit-icon-btn p-1 rounded hover:bg-gray-100" 
+                                data-action="edit" 
+                                data-id="${asset.id}" 
+                                data-field="avgCost" 
+                                data-value="${asset.avgCost}" 
+                                data-fieldname="Costo Medio"
+                                title="Modifica Costo Medio"
+                            >
+                                ${getEditIconSvg()}
+                            </button>
+                        `;
+                    }
+                    avgCostCell.innerHTML = `<div id="${containerIdCost}" class="avg-cost-container justify-end">${contentHTML_Cost}</div>`;
+                    
+                    // --- Colonna 4: Prezzo Attuale (Modificabile - NUOVO MECCANISMO) ---
+                    const containerIdPrice = `edit-container-${asset.id}-currentPrice`;
+                    const priceCell = row.insertCell();
+                    priceCell.className = 'px-3 py-4 whitespace-nowrap text-sm text-right';
+                    
+                    let contentHTML_Price = '';
+                    if (currentlyEditingId === containerIdPrice) {
+                        // Modalità modifica (Salva/Annulla)
+                         contentHTML_Price = `
+                            <input 
+                                type="number" 
+                                step="0.01" 
+                                id="edit-input-${asset.id}-currentPrice"
+                                value="${asset.currentPrice}" 
+                                data-id="${asset.id}"
+                                data-field="currentPrice"
+                                data-fieldname="Prezzo Attuale"
+                                class="w-24 p-1 border text-right rounded-md focus:ring-blue-500 focus:border-blue-500 text-gray-800"
+                            >
+                            <div class="flex flex-col gap-1 ml-2">
+                                <button data-action="save" data-id="${asset.id}" data-field="currentPrice" data-fieldname="Prezzo Attuale" class="text-xs bg-green-500 text-white rounded px-1 py-0.5 hover:bg-green-600 transition save-edit-btn" title="Salva Modifica">Salva</button>
+                                <button data-action="cancel" class="text-xs bg-red-500 text-white rounded px-1 py-0.5 hover:bg-red-600 transition cancel-edit-btn" title="Annulla Modifica">Annulla</button>
+                            </div>
+                        `;
+                    } else {
+                        // Modalità visualizzazione standard (Mostra matita)
+                        contentHTML_Price = `
+                            <span class="font-medium">${formatCurrency(asset.currentPrice)}</span>
+                            <button 
+                                class="edit-icon-btn p-1 rounded hover:bg-gray-100" 
+                                data-action="edit" 
+                                data-id="${asset.id}" 
+                                data-field="currentPrice" 
+                                data-value="${asset.currentPrice}" 
+                                data-fieldname="Prezzo Attuale"
+                                title="Modifica Prezzo Attuale"
+                            >
+                                ${getEditIconSvg()}
+                            </button>
+                        `;
+                    }
+                    priceCell.innerHTML = `<div id="${containerIdPrice}" class="avg-cost-container justify-end">${contentHTML_Price}</div>`;
+
+
+                    // Colonna 5: Valore Totale (Right-aligned)
+                    row.insertCell().innerHTML = `<span class="block text-right font-medium">${formatCurrency(currentValue)}</span>`;
+
+                    // Colonna 6: Guadagno/Perdita (Right-aligned, Colorato)
+                    row.insertCell().innerHTML = `<span class="block text-right font-bold ${gainLossClass}">${gainLossText}</span>`;
+
+                    // Colonna 7: Azioni (Elimina) 
+                    const actionsCell = row.insertCell();
+                    actionsCell.className = 'px-3 py-4 whitespace-nowrap text-right text-sm font-medium';
+                    actionsCell.innerHTML = `
+                        <button data-action="confirm-delete" data-id="${asset.id}" data-name="${asset.name}" class="text-red-600 hover:text-red-900 transition duration-150 delete-btn">
+                            Elimina
+                        </button>
+                    `;
+                });
+            }
+            
+            // Aggiorna il riepilogo totale
+            const totalGain = totalPortfolioValue - totalInvestedCapital;
+            const totalPercentChange = totalInvestedCapital > 0 ? (totalGain / totalInvestedCapital) : 0;
+            const totalGainClass = totalGain >= 0 ? 'text-emerald-300' : 'text-red-300';
+            const totalGainText = `${totalGain >= 0 ? 'Guadagno: ' : 'Perdita: '} ${formatCurrency(totalGain)} (${formatPercentage(totalPercentChange)})`;
+
+            totalValueEl.textContent = formatCurrency(totalPortfolioValue);
+            totalGainEl.className = totalGainClass;
+            totalGainEl.textContent = totalGainText;
+            
+            // Renderizza il grafico
+            renderChart(chartData, totalPortfolioValue);
+        }
+
+        // Funzione per eliminare un investimento
+        async function deleteInvestment(id) {
+            if (!userId) return showMessage("Accesso negato. Utente non autenticato.", true);
+            try {
+                const portfolioRef = getInvestmentCollectionRef();
+                if (!portfolioRef) return; 
+
+                const investDocRef = doc(portfolioRef, id);
+                await deleteDoc(investDocRef);
+                showMessage("Investimento eliminato!");
+            } catch (e) {
+                console.error("Errore nell'eliminazione dell'investimento:", e);
+                showMessage("Impossibile eliminare l'investimento.", true);
+            }
+        };
+
+        // --- Gestione Eventi (Delegazione) ---
+
+        // Delega eventi per i pulsanti Modifica, Elimina, Salva, Annulla
+        investmentsBody.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-action]');
+            if (!target) return;
+
+            const action = target.dataset.action;
+            const id = target.dataset.id;
+            const field = target.dataset.field;
+            const fieldName = target.dataset.fieldname;
+            const value = target.dataset.value;
+            const assetName = target.dataset.name;
+
+            switch (action) {
+                case 'edit':
+                    toggleEdit(id, field, value, fieldName);
+                    break;
+                case 'save':
+                    saveEdit(id, field, fieldName);
+                    break;
+                case 'cancel':
+                    cancelEdit();
+                    break;
+                case 'confirm-delete':
+                    // Mostra la modale di conferma
+                    assetToDeleteId = id;
+                    assetToDeleteNameEl.textContent = assetName;
+                    confirmModal.style.display = 'flex';
+                    break;
+            }
+        });
+        
+        // Listener per la modifica diretta del Prezzo Attuale (rimosso)
+        
+        // Listener Modale Conferma
+        confirmDeleteBtn.addEventListener('click', () => {
+            confirmModal.style.display = 'none';
+            if (assetToDeleteId) {
+                deleteInvestment(assetToDeleteId);
+                assetToDeleteId = null; 
+            }
+        });
+
+        cancelDeleteBtn.addEventListener('click', () => {
+            confirmModal.style.display = 'none';
+            assetToDeleteId = null; 
+        });
+
+
+        // Gestione dell'invio del form per Aggiungere un Nuovo Investimento
+        investmentForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // 1. Validazione di base e stato pronto
+            if (!isAuthReady) {
+                 // Mostra un errore se l'autenticazione non è pronta
+                 return showMessage("L'autenticazione non è pronta. Attendi il caricamento e riprova.", true);
+            }
+            if (!userId) {
+                // Questo non dovrebbe accadere se isAuthReady è true, ma è un controllo di sicurezza
+                return showMessage("ID Utente non definito. Ricarica la pagina per autenticarti.", true);
+            }
+
+
+            const name = assetNameInput.value.trim();
+            const ticker = assetTickerInput.value.trim().toUpperCase();
+            
+            // Recupero valori numerici
+            const quantityValue = quantityInput.value.trim();
+            const avgCostValue = avgCostInput.value.trim();
+
+            const quantity = parseFloat(quantityValue);
+            const avgCost = parseFloat(avgCostValue);
+
+            // Validazione rigorosa dei dati
+            if (name === "" || ticker === "" || isNaN(quantity) || quantity <= 0 || isNaN(avgCost) || avgCost <= 0) {
+                return showMessage("Per favore, inserisci dati validi (Nome, Ticker, Quantità > 0, Costo Medio > 0).", true);
+            }
+
+            // Disabilita il pulsante durante l'operazione di salvataggio
+            addInvestBtn.disabled = true;
+
+            try {
+                // 2. Ottenere il riferimento al portafoglio privato
+                const portfolioRef = getInvestmentCollectionRef();
+                if (!portfolioRef) {
+                    throw new Error("Riferimento alla collezione Firestore non valido.");
+                }
+                
+                // 3. Aggiunta a Firestore (Collection Privata)
+                await addDoc(portfolioRef, {
+                    name: name,
+                    ticker: ticker, 
+                    quantity: quantity,
+                    avgCost: avgCost,
+                    currentPrice: avgCost, 
+                    createdAt: serverTimestamp(),
+                    createdBy: userId
+                });
+                showMessage(`Investimento in ${name} (${ticker}) aggiunto con successo!`);
+                investmentForm.reset();
+            } catch (e) {
+                // Se c'è un errore di Firestore 
+                console.error("Errore Dettagliato nell'aggiunta dell'investimento:", e);
+                showMessage(`Impossibile aggiungere l'investimento. Potrebbe essere un problema di connessione. Controlla la console per i dettagli.`, true);
+            } finally {
+                // Riabilita il pulsante dopo il tentativo (successo o fallimento)
+                addInvestBtn.disabled = false;
+            }
+        });
+
+
+        // --- Implementazione Grafico D3.js (Distribuzione a Torta) ---
+
+        function renderChart(data, totalPortfolioValue) {
+            const container = document.getElementById('chart-container');
+            container.innerHTML = ''; // Pulisce il contenitore precedente
+
+            const activeData = data.filter(d => d.value > 0);
+            if (activeData.length === 0) {
+                container.innerHTML = '<p class="text-center text-gray-500">Aggiungi investimenti per visualizzare la distribuzione.</p>';
+                chartTooltip.style.opacity = 0; // Nasconde tooltip se vuoto
+                return;
+            }
+            
+            // Impostazioni del grafico (responsive)
+            const width = container.clientWidth;
+            const height = 250;
+            const margin = 10;
+            const radius = Math.min(width, height) / 2 - margin;
+            
+            const svg = d3.select("#chart-container")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height)
+                .append("g")
+                .attr("transform", `translate(${width / 2}, ${height / 2})`);
+
+            // Impostazione dei colori (Palette Tailwind-like)
+            const color = d3.scaleOrdinal()
+                .domain(activeData.map(d => d.name))
+                .range(["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#f97316", "#9ca3af"]);
+
+            // Calcola gli archi
+            const pie = d3.pie()
+                .value(d => d.value)
+                .sort(null);
+
+            const data_ready = pie(activeData);
+
+            // Generatore di path per gli archi
+            const arcGenerator = d3.arc()
+                .innerRadius(0)
+                .outerRadius(radius);
+
+            // Aggiungi gli archi (le "fette" della torta)
+            svg
+                .selectAll('pieces')
+                .data(data_ready)
+                .join('path')
+                .attr('d', arcGenerator)
+                .attr('fill', (d) => color(d.data.name))
+                .attr("stroke", "white")
+                .style("stroke-width", "2px")
+                .style("opacity", 0.9)
+                .on("mouseover", function(event, d) {
+                    d3.select(this).style("opacity", 1);
+                    chartTooltip.style.opacity = 1;
+                    chartTooltip.innerHTML = `
+                        <span class="font-bold">${d.data.name}</span><br>
+                        Valore: ${formatCurrency(d.data.value)}<br>
+                        % Portafoglio: ${formatPercentage(d.data.value / totalPortfolioValue)}
+                    `;
+                    chartTooltip.style.left = (event.pageX + 10) + "px";
+                    chartTooltip.style.top = (event.pageY - 28) + "px";
+                    chartTooltip.style.visibility = "visible";
+                })
+                .on("mousemove", function(event) {
+                    chartTooltip.style.left = (event.pageX + 10) + "px";
+                    chartTooltip.style.top = (event.pageY - 28) + "px";
+                })
+                .on("mouseleave", function() {
+                    d3.select(this).style("opacity", 0.9);
+                    chartTooltip.style.opacity = 0;
+                    chartTooltip.style.visibility = "hidden";
+                });
+        }
+
+        // Avvia l'app
+        initFirebaseAndAuth();
+
+    </script>
+</body>
+</html>
