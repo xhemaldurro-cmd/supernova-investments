@@ -210,7 +210,9 @@
         import { getFirestore, doc, addDoc, updateDoc, deleteDoc, onSnapshot, collection, query, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Variabili globali fornite dall'ambiente (MANDATORIE)
+        // Usiamo valori di fallback sicuri per garantire l'avvio su hosting esterni
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        // Configurazione di Firebase vuota per evitare errori se non è definita nell'ambiente esterno
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
@@ -279,6 +281,11 @@
             try {
                 // setLogLevel('debug');
                 
+                // NEW: Tentativo di inizializzazione con fallback a config vuota
+                if (Object.keys(firebaseConfig).length === 0) {
+                     console.warn("ATTENZIONE: Nessuna configurazione Firebase trovata. Utilizzo configurazione vuota, potrebbe funzionare solo per la struttura del percorso.");
+                }
+
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
@@ -286,6 +293,7 @@
                 if (initialAuthToken) {
                     await signInWithCustomToken(auth, initialAuthToken);
                 } else {
+                    // Autenticazione anonima come fallback per la persistenza privata
                     await signInAnonymously(auth);
                 }
 
@@ -296,7 +304,6 @@
                         
                         // Aggiorna le informazioni UI
                         userInfo.textContent = `Utente ID: ${userId} | I tuoi dati sono privati e non condivisi.`;
-                        // QUI: Abilita il pulsante solo dopo che l'autenticazione è completa
                         addInvestBtn.disabled = false; 
                         
                         console.log("Autenticazione riuscita. userId:", userId);
@@ -305,7 +312,6 @@
                         
                     } else {
                         showMessage("Autenticazione fallita. Ricarica la pagina.", true);
-                        // QUI: Assicura che il pulsante sia disabilitato in caso di fallimento
                         addInvestBtn.disabled = true; 
                     }
                     loadingIndicator.classList.add('hidden');
@@ -314,7 +320,8 @@
             } catch (error) {
                 console.error("Errore nell'inizializzazione o nell'autenticazione:", error);
                 loadingIndicator.classList.add('hidden');
-                showMessage(`Errore critico: ${error.message}`, true);
+                showMessage(`Errore critico: Impossibile avviare il servizio dati. ${error.message}`, true);
+                addInvestBtn.disabled = true; 
             }
         }
         
